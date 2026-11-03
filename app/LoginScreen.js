@@ -269,7 +269,16 @@ export default function LoginScreen() {
           password,
         });
 
-        router.replace('/(tabs)');
+        /*
+        |--------------------------------------------------------------------------
+        | ROUTE TO ADMIN HOMEPAGE
+        |--------------------------------------------------------------------------
+        */
+
+        router.replace(
+          '/(tabs)/HomepageScreen'
+        );
+
       } catch (error) {
         Alert.alert(
           'Login failed',
@@ -363,7 +372,16 @@ export default function LoginScreen() {
           googleAccessToken
         );
 
-        router.replace('/(tabs)');
+        /*
+        |--------------------------------------------------------------------------
+        | ROUTE TO ADMIN HOMEPAGE
+        |--------------------------------------------------------------------------
+        */
+
+        router.replace(
+          '/(tabs)/HomepageScreen'
+        );
+
       } catch (error) {
         if (isErrorWithCode(error)) {
           if (
@@ -384,7 +402,6 @@ export default function LoginScreen() {
 
             return;
           }
-
         }
 
         console.error(
@@ -726,8 +743,6 @@ export default function LoginScreen() {
     </SafeAreaView>
   );
 }
-
-
 
 
 /*

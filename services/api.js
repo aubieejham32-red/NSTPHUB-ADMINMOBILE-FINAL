@@ -16,8 +16,52 @@ const ACCOUNT_ROLE_KEY =
 const ACCOUNT_TYPE_KEY =
   'nstp_hub_admin_mobile_account_type';
 
-const REQUEST_TIMEOUT =
-  20000;
+
+const REQUEST_TIMEOUT = 20000;
+
+/*
+|--------------------------------------------------------------------------
+| Device Date / Time Context
+|--------------------------------------------------------------------------
+|
+| Admin Mobile sends its local device date/time with authenticated requests.
+| This keeps the mobile dashboard and attendance day aligned with the phone
+| when the development laptop clock is accidentally one day ahead/behind.
+|
+| The backend only accepts this override for Philippine-time devices and only
+| when the client/server calendar dates are within one day of each other.
+|
+*/
+function padDatePart(value) {
+  return String(value).padStart(2, '0');
+}
+
+function getClientDateContext() {
+  const now = new Date();
+
+  const year = now.getFullYear();
+  const month = padDatePart(now.getMonth() + 1);
+  const day = padDatePart(now.getDate());
+  const hour = padDatePart(now.getHours());
+  const minute = padDatePart(now.getMinutes());
+  const second = padDatePart(now.getSeconds());
+
+  const offsetMinutes = -now.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? '+' : '-';
+  const absoluteOffset = Math.abs(offsetMinutes);
+  const offsetHours = padDatePart(Math.floor(absoluteOffset / 60));
+  const offsetRemainder = padDatePart(absoluteOffset % 60);
+
+  const clientDate = `${year}-${month}-${day}`;
+  const clientDateTime =
+    `${clientDate}T${hour}:${minute}:${second}${sign}${offsetHours}:${offsetRemainder}`;
+
+  return {
+    clientDate,
+    clientDateTime,
+    offsetMinutes,
+  };
+}
 
 async function readJson(response) {
   const text = await response.text();
@@ -49,9 +93,19 @@ function getApiError(data, fallback) {
   return data?.message || fallback;
 }
 
+function makeApiError(response, data, fallback) {
+  const error = new Error(
+    getApiError(data, fallback)
+  );
+
+  error.status = response.status;
+  error.data = data;
+
+  return error;
+}
+
 async function apiRequest(url, options = {}) {
   const controller = new AbortController();
-
   const timeout = setTimeout(
     () => controller.abort(),
     REQUEST_TIMEOUT
@@ -147,19 +201,24 @@ async function saveUniversityAccessToken(token) {
   );
 }
 
-export async function clearAuthentication() {
-  await Promise.all([
+export async function clearAuthentication({
+  preserveUniversityAccess = false,
+} = {}) {
+  const deletions = [
     SecureStore.deleteItemAsync(TOKEN_KEY),
-    SecureStore.deleteItemAsync(
-      UNIVERSITY_ACCESS_TOKEN_KEY
-    ),
-    SecureStore.deleteItemAsync(
-      ACCOUNT_ROLE_KEY
-    ),
-    SecureStore.deleteItemAsync(
-      ACCOUNT_TYPE_KEY
-    ),
-  ]);
+    SecureStore.deleteItemAsync(ACCOUNT_ROLE_KEY),
+    SecureStore.deleteItemAsync(ACCOUNT_TYPE_KEY),
+  ];
+
+  if (!preserveUniversityAccess) {
+    deletions.push(
+      SecureStore.deleteItemAsync(
+        UNIVERSITY_ACCESS_TOKEN_KEY
+      )
+    );
+  }
+
+  await Promise.all(deletions);
 }
 
 async function authenticatedRequest(
@@ -167,6 +226,7 @@ async function authenticatedRequest(
   {
     method = 'GET',
     body = undefined,
+    formData = undefined,
   } = {}
 ) {
   const token = await getToken();
@@ -175,20 +235,36 @@ async function authenticatedRequest(
     throw new Error('You are not logged in.');
   }
 
+  const clientDateContext =
+    getClientDateContext();
+
   const headers = {
     Accept: 'application/json',
     Authorization: `Bearer ${token}`,
+    'X-NSTPHUB-Client-Date':
+      clientDateContext.clientDate,
+    'X-NSTPHUB-Client-DateTime':
+      clientDateContext.clientDateTime,
+    'X-NSTPHUB-Client-Timezone-Offset':
+      String(
+        clientDateContext.offsetMinutes
+      ),
   };
 
-  if (body !== undefined) {
+  let requestBody;
+
+  if (formData !== undefined) {
+    requestBody = formData;
+  } else if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
+    requestBody = JSON.stringify(body);
   }
 
   const response = await apiRequest(url, {
     method,
     headers,
-    ...(body !== undefined
-      ? { body: JSON.stringify(body) }
+    ...(requestBody !== undefined
+      ? { body: requestBody }
       : {}),
   });
 
@@ -203,11 +279,47 @@ async function authenticatedRequest(
   }
 
   if (!response.ok || data?.success === false) {
+    throw makeApiError(
+      response,
+      data,
+      `Request failed (HTTP ${response.status}).`
+    );
+  }
+
+  return data;
+}
+
+async function universityPublicRequest(
+  url,
+  body
+) {
+  const universityAccessToken =
+    await getUniversityAccessToken();
+
+  if (!universityAccessToken) {
     throw new Error(
-      getApiError(
-        data,
-        `Request failed (HTTP ${response.status}).`
-      )
+      'Your institutional authorization session has expired. Please enter the University Access Code again.'
+    );
+  }
+
+  const response = await apiRequest(url, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'X-University-Access-Token':
+        universityAccessToken,
+    },
+    body: JSON.stringify(body),
+  });
+
+  const data = await readJson(response);
+
+  if (!response.ok || data?.success === false) {
+    throw makeApiError(
+      response,
+      data,
+      `Request failed (HTTP ${response.status}).`
     );
   }
 
@@ -236,11 +348,10 @@ export async function verifyUniversityAccessCode(
   const data = await readJson(response);
 
   if (!response.ok || data?.success !== true) {
-    throw new Error(
-      getApiError(
-        data,
-        'Unable to verify the institutional authorization code.'
-      )
+    throw makeApiError(
+      response,
+      data,
+      'Unable to verify the institutional authorization code.'
     );
   }
 
@@ -286,11 +397,10 @@ export async function loginAdministrator({
   const data = await readJson(response);
 
   if (!response.ok || data?.success !== true) {
-    throw new Error(
-      getApiError(
-        data,
-        'Unable to sign in to this NSTP HUB staff account.'
-      )
+    throw makeApiError(
+      response,
+      data,
+      'Unable to sign in to this NSTP HUB staff account.'
     );
   }
 
@@ -331,11 +441,10 @@ export async function loginAdministratorWithGoogle(
   const data = await readJson(response);
 
   if (!response.ok || data?.success !== true) {
-    throw new Error(
-      getApiError(
-        data,
-        'Unable to sign in with Google.'
-      )
+    throw makeApiError(
+      response,
+      data,
+      'Unable to sign in with Google.'
     );
   }
 
@@ -365,6 +474,214 @@ export async function logoutAdministrator() {
       }
     );
   } finally {
-    await clearAuthentication();
+    await clearAuthentication({
+      preserveUniversityAccess: true,
+    });
   }
+}
+
+export async function sendAdminForgotPasswordCode(email) {
+  return universityPublicRequest(
+    API_ENDPOINTS.FORGOT_PASSWORD,
+    {
+      email: String(email || '').trim().toLowerCase(),
+    }
+  );
+}
+
+export async function verifyAdminForgotPasswordCode({
+  email,
+  code,
+  challengeToken,
+}) {
+  return universityPublicRequest(
+    API_ENDPOINTS.VERIFY_FORGOT_PASSWORD_CODE,
+    {
+      email: String(email || '').trim().toLowerCase(),
+      code: String(code || '').trim(),
+      challenge_token: challengeToken,
+    }
+  );
+}
+
+export async function resendAdminForgotPasswordCode({
+  email,
+  challengeToken,
+}) {
+  return universityPublicRequest(
+    API_ENDPOINTS.RESEND_FORGOT_PASSWORD_CODE,
+    {
+      email: String(email || '').trim().toLowerCase(),
+      challenge_token: challengeToken,
+    }
+  );
+}
+
+export async function resetAdminForgotPassword({
+  email,
+  resetToken,
+  password,
+  passwordConfirmation,
+}) {
+  return universityPublicRequest(
+    API_ENDPOINTS.RESET_FORGOT_PASSWORD,
+    {
+      email: String(email || '').trim().toLowerCase(),
+      reset_token: resetToken,
+      password,
+      password_confirmation: passwordConfirmation,
+    }
+  );
+}
+
+export async function getAttendance({
+  date = '',
+  component = '',
+} = {}) {
+  const params = new URLSearchParams();
+
+  if (date) {
+    params.set('date', date);
+  }
+
+  if (component) {
+    params.set('component', component);
+  }
+
+  const query = params.toString();
+
+  return authenticatedRequest(
+    `${API_ENDPOINTS.ATTENDANCE}${query ? `?${query}` : ''}`
+  );
+}
+
+export async function saveAttendanceSchedule(payload) {
+  return authenticatedRequest(
+    API_ENDPOINTS.ATTENDANCE_SCHEDULE,
+    {
+      method: 'PUT',
+      body: payload,
+    }
+  );
+}
+
+export async function deleteAttendanceSchedule(component) {
+  return authenticatedRequest(
+    `${API_ENDPOINTS.ATTENDANCE_SCHEDULE}/${encodeURIComponent(component)}`,
+    {
+      method: 'DELETE',
+    }
+  );
+}
+
+export async function scanAttendance(payload) {
+  return authenticatedRequest(
+    API_ENDPOINTS.ATTENDANCE_SCAN,
+    {
+      method: 'POST',
+      body: payload,
+    }
+  );
+}
+
+export async function getStudentAttendance(studentId) {
+  return authenticatedRequest(
+    `${API_ENDPOINTS.ATTENDANCE}/students/${studentId}`
+  );
+}
+
+export async function updateStudentNstpStatus(
+  studentId,
+  nstpStatus
+) {
+  return authenticatedRequest(
+    `${API_ENDPOINTS.ATTENDANCE}/students/${studentId}/status`,
+    {
+      method: 'PATCH',
+      body: {
+        nstp_status: nstpStatus,
+      },
+    }
+  );
+}
+
+export async function getExcuseLetters(component = '') {
+  const query = component
+    ? `?component=${encodeURIComponent(component)}`
+    : '';
+
+  return authenticatedRequest(
+    `${API_ENDPOINTS.EXCUSE_LETTERS}${query}`
+  );
+}
+
+export async function reviewExcuseLetter({
+  id,
+  action,
+  feedback,
+  component = '',
+}) {
+  if (!['approve', 'reject'].includes(action)) {
+    throw new Error('Invalid excuse-letter action.');
+  }
+
+  const query = component
+    ? `?component=${encodeURIComponent(component)}`
+    : '';
+
+  return authenticatedRequest(
+    `${API_ENDPOINTS.EXCUSE_LETTERS}/${id}/${action}${query}`,
+    {
+      method: 'PATCH',
+      body: {
+        feedback,
+      },
+    }
+  );
+}
+
+export async function getAdminProfile() {
+  return authenticatedRequest(
+    API_ENDPOINTS.PROFILE
+  );
+}
+
+export async function uploadAdminProfilePhoto({
+  uri,
+  name = 'profile.jpg',
+  type = 'image/jpeg',
+}) {
+  const formData = new FormData();
+
+  formData.append('profile_photo', {
+    uri,
+    name,
+    type,
+  });
+
+  return authenticatedRequest(
+    API_ENDPOINTS.PROFILE_PHOTO,
+    {
+      method: 'POST',
+      formData,
+    }
+  );
+}
+
+export async function changeAdministratorPassword({
+  current_password,
+  password,
+  password_confirmation,
+}) {
+  return authenticatedRequest(
+    API_ENDPOINTS.CHANGE_PASSWORD,
+    {
+      method: 'POST',
+      body: {
+        current_password,
+        password,
+        password_confirmation,
+      },
+    }
+  );
 }

@@ -2,15 +2,11 @@
 |--------------------------------------------------------------------------
 | NSTP HUB Admin Mobile API Configuration
 |--------------------------------------------------------------------------
-|
-| Set EXPO_PUBLIC_NSTPHUB_SERVER_URL in .env when your Laravel server IP
-| changes.
-|
 */
 
 export const SERVER_URL =
   process.env.EXPO_PUBLIC_NSTPHUB_SERVER_URL ||
-  'http://192.168.254.158:8000';
+  'http://192.168.1.38:8000';
 
 export const API_URL = `${SERVER_URL}/api`;
 export const ADMIN_MOBILE_API_URL = `${API_URL}/admin-mobile`;
@@ -33,4 +29,37 @@ export const API_ENDPOINTS = {
 
   LOGOUT:
     `${ADMIN_MOBILE_API_URL}/logout`,
+
+  FORGOT_PASSWORD:
+    `${ADMIN_MOBILE_API_URL}/forgot-password`,
+
+  VERIFY_FORGOT_PASSWORD_CODE:
+    `${ADMIN_MOBILE_API_URL}/forgot-password/verify-code`,
+
+  RESEND_FORGOT_PASSWORD_CODE:
+    `${ADMIN_MOBILE_API_URL}/forgot-password/resend-code`,
+
+  RESET_FORGOT_PASSWORD:
+    `${ADMIN_MOBILE_API_URL}/forgot-password/reset`,
+
+  ATTENDANCE:
+    `${ADMIN_MOBILE_API_URL}/attendance`,
+
+  ATTENDANCE_SCHEDULE:
+    `${ADMIN_MOBILE_API_URL}/attendance/schedule`,
+
+  ATTENDANCE_SCAN:
+    `${ADMIN_MOBILE_API_URL}/attendance/scan`,
+
+  EXCUSE_LETTERS:
+    `${ADMIN_MOBILE_API_URL}/excuse-letters`,
+
+  PROFILE:
+    `${ADMIN_MOBILE_API_URL}/profile`,
+
+  PROFILE_PHOTO:
+    `${ADMIN_MOBILE_API_URL}/profile/photo`,
+
+  CHANGE_PASSWORD:
+    `${ADMIN_MOBILE_API_URL}/change-password`,
 };
