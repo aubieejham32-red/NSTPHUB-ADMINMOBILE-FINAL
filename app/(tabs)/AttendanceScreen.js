@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
 import {
   ActivityIndicator,
@@ -455,6 +455,9 @@ function getSchedule(
 */
 
 export default function AttendanceScreen() {
+  // Native camera callbacks can arrive before React's state is updated.
+  const scanInFlightRef = useRef(false);
+
   const insets =
     useSafeAreaInsets();
 
@@ -1632,6 +1635,8 @@ export default function AttendanceScreen() {
       setScanType('');
       setLastQrToken('');
 
+      scanInFlightRef.current = false;
+
       setScannerExpanded(
         true
       );
@@ -1681,6 +1686,7 @@ export default function AttendanceScreen() {
       data,
     }) => {
       if (
+        scanInFlightRef.current ||
         processingScan ||
         !scannerActive
       ) {
@@ -1700,6 +1706,7 @@ export default function AttendanceScreen() {
       if (
         !token
       ) {
+        scanInFlightRef.current = true;
         setScannerActive(
           false
         );
@@ -1715,6 +1722,7 @@ export default function AttendanceScreen() {
         return;
       }
 
+      scanInFlightRef.current = true;
       setProcessingScan(
         true
       );

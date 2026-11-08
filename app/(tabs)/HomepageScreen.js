@@ -10,6 +10,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 
@@ -263,6 +264,8 @@ function formatScheduleTime(value) {
 
 
 export default function HomepageScreen() {
+  const scanInFlightRef = useRef(false);
+
   const insets =
     useSafeAreaInsets();
 
@@ -1184,6 +1187,8 @@ export default function HomepageScreen() {
         setScanResult(null);
         setScannerError('');
 
+        scanInFlightRef.current = false;
+
 
         setScannerActive(
           true
@@ -1389,6 +1394,7 @@ export default function HomepageScreen() {
       data: qrValue,
     }) => {
       if (
+        scanInFlightRef.current ||
         processingScan
         ||
         !scannerActive
@@ -1414,6 +1420,7 @@ export default function HomepageScreen() {
       if (
         !token
       ) {
+        scanInFlightRef.current = true;
         setScannerActive(
           false
         );
@@ -1434,6 +1441,7 @@ export default function HomepageScreen() {
       }
 
 
+      scanInFlightRef.current = true;
       setProcessingScan(
         true
       );

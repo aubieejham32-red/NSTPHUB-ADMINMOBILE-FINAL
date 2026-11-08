@@ -4,9 +4,19 @@
 |--------------------------------------------------------------------------
 */
 
-export const SERVER_URL =
-  process.env.EXPO_PUBLIC_NSTPHUB_SERVER_URL ||
-  'http://192.168.1.38:8000';
+const configuredServerUrl =
+  (process.env.EXPO_PUBLIC_NSTPHUB_SERVER_URL || '').trim();
+
+const isDevelopment =
+  typeof __DEV__ !== 'undefined' && __DEV__;
+
+// Never package a local Wi-Fi server address into a release APK.
+export const SERVER_URL = (
+  configuredServerUrl &&
+  (isDevelopment || /^https:\/\//i.test(configuredServerUrl))
+    ? configuredServerUrl
+    : 'https://nstphub-final-web-production.up.railway.app'
+).replace(/\/+$/, '');
 
 export const API_URL = `${SERVER_URL}/api`;
 export const ADMIN_MOBILE_API_URL = `${API_URL}/admin-mobile`;
